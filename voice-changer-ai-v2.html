@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مغيّر الصوت الذكي</title>
+<style>
+:root{
+  --bg:#f5f3ff; --card:#ffffff; --text:#1f1b2e; --muted:#6b6478;
+  --accent:#8b5cf6; --accent2:#ec4899; --ring:#e9e4fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15121f; --card:#1f1b2e; --text:#f4f1fb; --muted:#a79fc0;
+    --accent:#a78bfa; --accent2:#f472b6; --ring:#332b4d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15121f; --card:#1f1b2e; --text:#f4f1fb; --muted:#a79fc0;
+  --accent:#a78bfa; --accent2:#f472b6; --ring:#332b4d;
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  display:flex; justify-content:center;
+  padding: calc(24px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px));
+}
+.wrap{width:100%; max-width:420px;}
+h1{font-size:1.3rem; text-align:center; margin:0 0 4px;}
+p.sub{color:var(--muted); text-align:center; margin:0 0 20px; font-size:0.86rem; line-height:1.6;}
+.card{background:var(--card); border-radius:20px; padding:20px; box-shadow:0 8px 24px rgba(0,0,0,0.08); margin-bottom:16px;}
+select{
+  width:100%; padding:12px; border-radius:12px; border:2px solid var(--ring);
+  background:var(--card); color:var(--text); font-size:1rem; margin-bottom:12px;
+}
+label.chunk{display:block; font-size:0.82rem; color:var(--muted); margin-bottom:16px;}
+input[type=range]{width:100%;}
+#recBtn{
+  width:100%; padding:20px; border:none; border-radius:16px; font-size:1.1rem; font-weight:700;
+  color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); cursor:pointer;
+}
+#recBtn.recording{background:linear-gradient(135deg,#ef4444,#f97316);}
+#status{text-align:center; margin-top:14px; font-size:0.86rem; color:var(--muted); min-height:1.3em;}
+.dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:#ef4444; margin-left:6px; animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+.warn{background:var(--ring); border-radius:14px; padding:12px 14px; font-size:0.78rem; color:var(--muted); line-height:1.7;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙️ مغيّر الصوت الذكي</h1>
+  <p class="sub">اختر الصوت، اضغط "ابدأ المحادثة" وتحدّث بشكل طبيعي — سيخرج صوتك محوّلاً تباعاً كل بضع ثوانٍ.</p>
+
+  <div class="card">
+    <select id="voiceSelect"><option>جارٍ تحميل الأصوات...</option></select>
+    <label class="chunk">طول كل مقطع: <span id="chunkVal">3</span> ثوانٍ (أقصر = أسرع لكن أقل دقة)</label>
+    <input type="range" id="chunkRange" min="2" max="6" step="1" value="3">
+    <button id="recBtn">🎤 ابدأ المحادثة</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="warn">
+    ⚠️ كل مقطع يستهلك رصيداً من حسابك. استخدم سماعات رأس لتفادي التقاط المايكروفون لصوت الإخراج.
+  </div>
+</div>
+
+<script>
+const API_KEY = "sk_f68d9349d4fd0024bd5041f84e1d8c763a4d4bf8b78687a8";
+const voiceSelect = document.getElementById('voiceSelect');
+const recBtn = document.getElementById('recBtn');
+const status = document.getElementById('status');
+const chunkRange = document.getElementById('chunkRange');
+const chunkVal = document.getElementById('chunkVal');
+
+chunkRange.addEventListener('input', ()=> chunkVal.textContent = chunkRange.value);
+
+let running = false, stream = null, recorder = null, cycleTimer = null;
+const playQueue = [];
+let playing = false;
+
+async function loadVoices(){
+  try{
+    const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': API_KEY } });
+    const data = await res.json();
+    voiceSelect.innerHTML = '';
+    (data.voices || []).forEach(v=>{
+      const opt = document.createElement('option');
+      opt.value = v.voice_id; opt.textContent = v.name;
+      voiceSelect.appendChild(opt);
+    });
+    if(!data.voices || !data.voices.length) voiceSelect.innerHTML = '<option>لا توجد أصوات</option>';
+  }catch(err){
+    voiceSelect.innerHTML = '<option>تعذّر تحميل الأصوات</option>';
+  }
+}
+loadVoices();
+
+function playNext(){
+  if(playing || playQueue.length === 0) return;
+  playing = true;
+  const url = playQueue.shift();
+  const audio = new Audio(url);
+  audio.onended = ()=>{ playing = false; playNext(); };
+  audio.play().catch(()=>{ playing = false; playNext(); });
+}
+
+async function sendChunk(blob){
+  try{
+    const voiceId = voiceSelect.value;
+    const form = new FormData();
+    form.append('audio', blob, 'chunk.webm');
+    form.append('model_id', 'eleven_multilingual_sts_v2');
+    const res = await fetch(`https://api.elevenlabs.io/v1/speech-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+      method: 'POST', headers: { 'xi-api-key': API_KEY }, body: form
+    });
+    if(!res.ok) return;
+    const audioBlob = await res.blob();
+    playQueue.push(URL.createObjectURL(audioBlob));
+    playNext();
+  }catch(err){ /* skip failed chunk, keep going */ }
+}
+
+function recordOneChunk(durationMs){
+  return new Promise(resolve=>{
+    const chunks = [];
+    const rec = new MediaRecorder(stream);
+    rec.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
+    rec.onstop = () => resolve(new Blob(chunks, { type: 'audio/webm' }));
+    rec.start();
+    setTimeout(()=>{ if(rec.state !== 'inactive') rec.stop(); }, durationMs);
+  });
+}
+
+async function loop(){
+  while(running){
+    const durationMs = parseInt(chunkRange.value) * 1000;
+    const blob = await recordOneChunk(durationMs);
+    if(!running) break;
+    sendChunk(blob);
+  }
+}
+
+recBtn.addEventListener('click', async ()=>{
+  if(!running){
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      running = true;
+      recBtn.textContent = '⏹️ إيقاف المحادثة';
+      recBtn.classList.add('recording');
+      status.innerHTML = 'المحادثة جارية <span class="dot"></span>';
+      loop();
+    }catch(err){
+      status.textContent = 'تعذّر الوصول للمايكروفون.';
+    }
+  } else {
+    running = false;
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    recBtn.textContent = '🎤 ابدأ المحادثة';
+    recBtn.classList.remove('recording');
+    status.textContent = 'تم الإيقاف';
+  }
+});
+</script>
+</body>
+</html>
