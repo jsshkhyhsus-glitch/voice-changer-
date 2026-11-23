@@ -1,0 +1,21 @@
+{
+  "name": "مغيّر الصوت الذكي",
+  "short_name": "مغيّر الصوت",
+  "description": "تطبيق لتحويل الصوت بالذكاء الاصطناعي إلى أصوات مختلفة",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#15121f",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
